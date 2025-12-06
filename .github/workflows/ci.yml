@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  lint:
+    name: Lint Code
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: ['20', '21']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+  validate:
+    name: Validate Project Structure
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check required files
+        run: |
+          echo "Checking required files..."
+          test -f package.json || (echo "❌ package.json not found" && exit 1)
+          test -f README.md || (echo "❌ README.md not found" && exit 1)
+          test -f src/index.js || (echo "❌ src/index.js not found" && exit 1)
+          test -d src/commands || (echo "❌ src/commands directory not found" && exit 1)
+          test -d src/api || (echo "❌ src/api directory not found" && exit 1)
+          test -d src/utils || (echo "❌ src/utils directory not found" && exit 1)
+          echo "✅ All required files present"
+
+      - name: Validate package.json
+        run: |
+          node -e "
+            const pkg = require('./package.json');
+            if (!pkg.name) throw new Error('Missing package name');
+            if (!pkg.version) throw new Error('Missing version');
+            if (!pkg.main) throw new Error('Missing main entry point');
+            if (pkg.engines && pkg.engines.node) {
+              console.log('✅ Node.js version constraint:', pkg.engines.node);
+            }
+            console.log('✅ package.json is valid');
+          "
+
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit
+        run: npm audit --audit-level=moderate
+        continue-on-error: true
+
+      - name: Check for known vulnerabilities
+        run: npm audit --audit-level=high

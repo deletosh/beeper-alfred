@@ -1,0 +1,140 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.0.0)'
+        required: true
+        type: string
+
+jobs:
+  build:
+    name: Build Alfred Workflow
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --production
+
+      - name: Get version
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update version in package.json
+        run: |
+          npm version ${{ steps.get_version.outputs.version }} --no-git-tag-version
+
+      - name: Generate icons
+        run: npm run generate-icons || echo "Icon generation skipped (optional)"
+        continue-on-error: true
+
+      - name: Build workflow package
+        run: npm run build
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: beeper-alfred-${{ steps.get_version.outputs.version }}
+          path: dist/*.alfredworkflow
+          retention-days: 90
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download workflow artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: beeper-alfred-${{ steps.get_version.outputs.version }}
+          path: dist
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          echo "## What's Changed" > changelog.md
+          echo "" >> changelog.md
+
+          # Get commits since last tag
+          LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -z "$LAST_TAG" ]; then
+            git log --pretty=format:"* %s (%h)" >> changelog.md
+          else
+            git log ${LAST_TAG}..HEAD --pretty=format:"* %s (%h)" >> changelog.md
+          fi
+
+          echo "" >> changelog.md
+          echo "" >> changelog.md
+          echo "## Installation" >> changelog.md
+          echo "" >> changelog.md
+          echo "1. Download the \`beeper-alfred.alfredworkflow\` file below" >> changelog.md
+          echo "2. Double-click to install in Alfred" >> changelog.md
+          echo "3. Run \`bp setup\` in Alfred to configure your Beeper API token" >> changelog.md
+          echo "" >> changelog.md
+          echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$LAST_TAG...v${{ steps.get_version.outputs.version }}" >> changelog.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.get_version.outputs.version }}
+          name: Release v${{ steps.get_version.outputs.version }}
+          body_path: changelog.md
+          files: dist/*.alfredworkflow
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  notify:
+    name: Post-Release Notification
+    needs: release
+    runs-on: ubuntu-latest
+    if: success()
+
+    steps:
+      - name: Get version
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Success notification
+        run: |
+          echo "✅ Release v${{ steps.get_version.outputs.version }} published successfully!"
+          echo "📦 Download: https://github.com/${{ github.repository }}/releases/tag/v${{ steps.get_version.outputs.version }}"

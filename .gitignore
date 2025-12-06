@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.local
+
+# macOS
+.DS_Store
+
+# Alfred
+*.alfredworkflow
+info.plist
+
+# IDE
+.vscode/
+.claude
+.idea/
+*.swp
+*.swo
+*~
+
+# Project Documentation
+CLAUDE.md
+
+# Logs
+*.log
+npm-debug.log*
+
+# Cache
+.cache/
+
+# Test Coverage
+coverage/
+*.coverage
+.nyc_output/
+
+# Build Output
+dist/
