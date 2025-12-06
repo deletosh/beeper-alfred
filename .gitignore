@@ -10,7 +10,6 @@ node_modules/
 
 # Alfred
 *.alfredworkflow
-info.plist
 
 # IDE
 .vscode/

@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>bundleid</key>
+	<string>com.deletosh.beeper-alfred</string>
+	<key>category</key>
+	<string>Productivity</string>
+	<key>connections</key>
+	<dict>
+		<key>F7E9A8B1-3C4D-4E5F-9A0B-1C2D3E4F5A6B</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>ACTION-HANDLER-UUID</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+		</array>
+	</dict>
+	<key>createdby</key>
+	<string>deletosh</string>
+	<key>description</key>
+	<string>Alfred workflow for Beeper Desktop - Search messages, send messages, and manage chats across all messaging networks</string>
+	<key>disabled</key>
+	<false/>
+	<key>name</key>
+	<string>Beeper for Alfred</string>
+	<key>userconfigurationconfig</key>
+	<array>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string></string>
+				<key>placeholder</key>
+				<string>Paste your Beeper Desktop API token here</string>
+				<key>required</key>
+				<true/>
+				<key>trim</key>
+				<true/>
+			</dict>
+			<key>description</key>
+			<string>Get your token from Beeper Desktop → Settings → Developers → Enable "Beeper Desktop API"</string>
+			<key>label</key>
+			<string>Beeper Access Token</string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>BEEPER_ACCESS_TOKEN</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>http://localhost:23373</string>
+				<key>placeholder</key>
+				<string>http://localhost:23373</string>
+				<key>required</key>
+				<false/>
+				<key>trim</key>
+				<true/>
+			</dict>
+			<key>description</key>
+			<string>Beeper Desktop API URL (default: http://localhost:23373)</string>
+			<key>label</key>
+			<string>API URL</string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>BEEPER_API_URL</string>
+		</dict>
+	</array>
+	<key>objects</key>
+	<array>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>alfredfiltersresults</key>
+				<false/>
+				<key>alfredfiltersresultsmatchmode</key>
+				<integer>0</integer>
+				<key>argumenttreatemptyqueryasnil</key>
+				<true/>
+				<key>argumenttrimmode</key>
+				<integer>0</integer>
+				<key>argumenttype</key>
+				<integer>1</integer>
+				<key>escaping</key>
+				<integer>102</integer>
+				<key>keyword</key>
+				<string>bp</string>
+				<key>queuedelaycustom</key>
+				<integer>3</integer>
+				<key>queuedelayimmediatelyinitially</key>
+				<true/>
+				<key>queuedelaymode</key>
+				<integer>0</integer>
+				<key>queuemode</key>
+				<integer>1</integer>
+				<key>runningsubtext</key>
+				<string>Loading...</string>
+				<key>script</key>
+				<string># Route based on first argument
+if [ -z "$1" ]; then
+  # No argument - show menu
+  node src/index.js menu
+else
+  # Has argument - parse subcommand
+  cmd=$(echo "$1" | awk '{print $1}')
+  args=$(echo "$1" | cut -d' ' -f2-)
+
+  case "$cmd" in
+    search|send|unread|recent|setup)
+      if [ "$cmd" = "$args" ]; then
+        node src/index.js "$cmd"
+      else
+        node src/index.js "$cmd" "$args"
+      fi
+      ;;
+    *)
+      node src/index.js menu "$1"
+      ;;
+  esac
+fi</string>
+				<key>scriptargtype</key>
+				<integer>1</integer>
+				<key>scriptfile</key>
+				<string></string>
+				<key>subtext</key>
+				<string>Main menu - Choose an action</string>
+				<key>title</key>
+				<string>Beeper for Alfred</string>
+				<key>type</key>
+				<integer>5</integer>
+				<key>withspace</key>
+				<true/>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.input.scriptfilter</string>
+			<key>uid</key>
+			<string>F7E9A8B1-3C4D-4E5F-9A0B-1C2D3E4F5A6B</string>
+			<key>version</key>
+			<integer>3</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>concurrently</key>
+				<false/>
+				<key>escaping</key>
+				<integer>102</integer>
+				<key>script</key>
+				<string># Pass the raw pipe-delimited string to Node.js
+# Node.js will handle the splitting
+node src/index.js action-raw "$1"</string>
+				<key>scriptargtype</key>
+				<integer>1</integer>
+				<key>scriptfile</key>
+				<string></string>
+				<key>type</key>
+				<integer>5</integer>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.action.script</string>
+			<key>uid</key>
+			<string>ACTION-HANDLER-UUID</string>
+			<key>version</key>
+			<integer>2</integer>
+		</dict>
+	</array>
+	<key>readme</key>
+	<string># Beeper for Alfred
+
+Quick access to all your messages across WhatsApp, Telegram, Signal, Slack, and more—right from Alfred.
+
+## Quick Start
+
+1. **Enable API in Beeper Desktop:**
+   - Open Beeper Desktop → Settings (⌘,) → Developers
+   - Toggle "Beeper Desktop API" to ON
+   - Copy your Access Token
+
+2. **Configure Workflow:**
+   - Type `bp setup` in Alfred
+   - Follow the setup instructions
+   - Paste your access token when prompted
+
+## Commands
+
+### Main Menu
+Type `bp` or `beeper` to see all available commands.
+
+### Search Messages
+`bp search &lt;query&gt;` - Search across all networks
+- ↵ Open message in Beeper
+- ⌘↵ Copy message text
+- ⌥↵ Quick reply
+
+### Send Message
+`bp send` - Send message to any contact
+1. Type contact name
+2. Select contact
+3. Type message and press ↵
+
+### Unread Inbox
+`bp unread` - View all unread messages
+- ↵ Open chat
+- ⌘↵ Quick reply
+- ⌥↵ Archive chat
+
+### Recent Chats
+`bp recent` - Quick access to last 10 chats
+
+## Network Filters
+Add `:network` to filter by platform:
+- `bp search:whatsapp dinner`
+- `bp unread:telegram`
+
+## Troubleshooting
+
+**"Could not connect to Beeper Desktop API"**
+→ Ensure Beeper Desktop is running and API is enabled
+
+**"Invalid access token"**
+→ Run `bp setup` to reconfigure
+
+For more help, visit: https://github.com/deletosh/beeper-alfred</string>
+	<key>uidata</key>
+	<dict>
+		<key>F7E9A8B1-3C4D-4E5F-9A0B-1C2D3E4F5A6B</key>
+		<dict>
+			<key>xpos</key>
+			<real>50</real>
+			<key>ypos</key>
+			<real>50</real>
+		</dict>
+		<key>ACTION-HANDLER-UUID</key>
+		<dict>
+			<key>xpos</key>
+			<real>250</real>
+			<key>ypos</key>
+			<real>50</real>
+		</dict>
+	</dict>
+	<key>version</key>
+	<string>1.0.0</string>
+	<key>webaddress</key>
+	<string>https://github.com/deletosh/beeper-alfred</string>
+</dict>
+</plist>
