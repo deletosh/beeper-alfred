@@ -34,7 +34,7 @@
     "@beeper/desktop-api": "^0.1.0"
   },
   "devDependencies": {
-    "@commitlint/cli": "^20.2.0",
+    "@commitlint/cli": "^20.3.0",
     "@commitlint/config-conventional": "^20.2.0",
     "archiver": "^6.0.1",
     "eslint": "^8.56.0",
