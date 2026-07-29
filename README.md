@@ -131,6 +131,49 @@ Send a message to a contact or start a new conversation.
 - `⌘↵` Open and start typing
 - `⌥↵` Add file attachment
 
+#### `bp contact <name>`
+Find a person across every connected network and pick where to message them.
+
+Where `bp send` lists each match separately, `bp contact` groups results by
+person: one row per network you can actually reach them on, so you can choose
+whether to message someone on WhatsApp, Telegram, Signal, etc.
+
+**What it shows:**
+- The person's name once, followed by each network they're reachable on
+- 💬 **Existing chat** - with the last message and when it happened
+- 👤 **Start new conversation** - for networks where you have no chat yet
+- Networks where Beeper can't start a DM are shown but not selectable
+
+**How it works:**
+1. Type `bp contact alice` to search every network at once
+2. Pick the network you want to reach them on
+3. Press `↵` to open the conversation in Beeper
+
+**Send without leaving Alfred:**
+
+Add `>>` followed by your message to send it immediately:
+
+```
+bp contact alice >> running 10 minutes late
+```
+
+Each row then becomes "send on this network" — pick WhatsApp or Telegram and
+the message goes out directly. If no chat exists yet on that network, one is
+started first.
+
+**Examples:**
+- `bp contact mom` - See every network mom is reachable on
+- `bp contact alice >> on my way` - Send straight to Alice, choosing the network
+
+**Keyboard Shortcuts:**
+- `↵` Open the conversation (or send, when using `>>`)
+- `⌘↵` Open in Beeper with the message box focused
+- `⌥↵` Copy the contact's name
+
+**Notes:**
+- A network whose bridge is offline is skipped rather than failing the search
+- Your own account is never listed as a contact
+
 #### `bp unread`
 View all unread messages across all networks.
 
