@@ -1,29 +1,120 @@
 /**
  * Setup Command
- * Initial configuration and API token setup
+ *
+ * Shows connection status and offers to authorize via OAuth.
+ *
+ * This runs as an Alfred Script Filter, which is re-executed on every
+ * keystroke and killed when the user types again — so it must never run the
+ * OAuth flow itself. It only reports status and emits an actionable item;
+ * the flow runs in the `authorize` action (see src/commands/action.js).
  */
 
 const { createItem, outputItems, outputError } = require('../utils/alfred');
 const BeeperClient = require('../api/client');
+const { loadToken, isExpired } = require('../utils/tokenStore');
+
+/**
+ * Build the item that kicks off the OAuth flow
+ * @param {string} title - Item title
+ * @param {string} subtitle - Item subtitle
+ * @returns {Object} Alfred item
+ */
+function authorizeItem(title, subtitle) {
+  return createItem({
+    uid: 'setup-authorize',
+    title,
+    subtitle,
+    arg: 'authorize',
+    valid: true,
+    icon: { path: 'icon.png' }
+  });
+}
+
+/**
+ * Describe where the active token came from, so a stale hand-pasted
+ * workflow variable overriding the OAuth token is visible rather than baffling.
+ * @returns {string} Human-readable source
+ */
+function tokenSource() {
+  return process.env.BEEPER_ACCESS_TOKEN
+    ? 'Workflow variable (BEEPER_ACCESS_TOKEN)'
+    : 'Saved by bp setup';
+}
 
 /**
  * Setup command handler
- * @param {Array} args - Command arguments (token if provided for validation)
+ * @param {Array} _args - Unused; authorization is interactive
  */
-async function setup(args) {
+async function setup(_args) {
   try {
-    const currentToken = process.env.BEEPER_ACCESS_TOKEN;
-    const testToken = args.join(' ').trim();
+    const stored = loadToken();
+    const hasEnvToken = Boolean(process.env.BEEPER_ACCESS_TOKEN);
 
-    // If token is provided as argument, validate it
-    if (testToken) {
-      // Check if it looks like a valid token (basic validation)
-      if (testToken.length < 20) {
+    // Nothing configured at all — first run
+    if (!stored && !hasEnvToken) {
+      outputItems([
+        authorizeItem(
+          '🔐 Connect Alfred to Beeper',
+          'Press ↵ to authorize in your browser'
+        ),
+        createItem({
+          uid: 'setup-info',
+          title: 'ℹ️ What happens next',
+          subtitle: 'Beeper opens a consent page; approve it and you are done',
+          valid: false,
+          icon: { path: 'icon.png' }
+        })
+      ]);
+      return;
+    }
+
+    // Something is configured — the API is the authority on whether it works
+    try {
+      const client = new BeeperClient();
+      await client.testConnection();
+
+      const items = [
+        createItem({
+          uid: 'setup-connected',
+          title: '✅ Connected to Beeper',
+          subtitle: `Authorization is working • ${tokenSource()}`,
+          valid: false,
+          icon: { path: 'icon.png' }
+        }),
+        authorizeItem(
+          '🔄 Re-authorize',
+          'Replace the current authorization with a fresh one'
+        )
+      ];
+
+      // A token past its stated expiry that still works is worth flagging
+      if (stored && isExpired(stored)) {
+        items.splice(1, 0, createItem({
+          uid: 'setup-expiry',
+          title: '⚠️ Stored authorization has passed its expiry',
+          subtitle: 'It still works for now — re-authorize to avoid surprises',
+          valid: false,
+          icon: { path: 'icon.png' }
+        }));
+      }
+
+      outputItems(items);
+      return;
+    } catch (error) {
+      // Distinguish "not running" from "not authorized" — different fixes
+      if (error.message.includes('ECONNREFUSED') || error.message.includes('not running')) {
         outputItems([
           createItem({
-            uid: 'setup-error',
-            title: '❌ Invalid Token',
-            subtitle: 'Token seems too short. Please copy the full token from Beeper Desktop.',
+            uid: 'setup-offline',
+            title: '❌ Beeper Desktop is not running',
+            subtitle: 'Start Beeper Desktop, then run bp setup again',
+            valid: false,
+            icon: { path: 'icon.png' }
+          }),
+          createItem({
+            uid: 'setup-offline-help',
+            title: 'Also check the API is enabled',
+            subtitle: 'Beeper → Settings (⌘,) → Developers → Allow connections',
             valid: false,
             icon: { path: 'icon.png' }
           })
@@ -31,188 +122,35 @@ async function setup(args) {
         return;
       }
 
-      // Try to connect with the token
-      try {
-        const client = new BeeperClient(testToken);
-        await client.testConnection();
+      if (error.status === 401) {
+        const detail = hasEnvToken
+          ? 'The BEEPER_ACCESS_TOKEN workflow variable is invalid or expired'
+          : 'Your saved authorization has expired or was revoked';
 
-        // Connection successful
         outputItems([
+          authorizeItem('🔐 Re-authorize with Beeper', 'Press ↵ to authorize in your browser'),
           createItem({
-            uid: 'setup-success',
-            title: '✅ Token Validated Successfully!',
-            subtitle: 'Now configure it in the workflow settings (see below)',
-            valid: false,
-            icon: { path: 'icon.png' }
-          }),
-          createItem({
-            uid: 'setup-instructions-1',
-            title: '📝 Step 1: Press ⌘C to Copy Token',
-            subtitle: 'Copy the validated token to clipboard',
-            valid: false,
-            text: {
-              copy: testToken,
-              largetype: testToken
-            },
-            icon: { path: 'icon.png' }
-          }),
-          createItem({
-            uid: 'setup-instructions-2',
-            title: '📝 Step 2: Open Workflow Configuration',
-            subtitle: 'Click the [≡] button at top-right of workflow → Configure Workflow...',
-            valid: false,
-            icon: { path: 'icon.png' }
-          }),
-          createItem({
-            uid: 'setup-instructions-3',
-            title: '📝 Step 3: Paste Token',
-            subtitle: 'Paste into "Beeper Access Token" field and click Save',
+            uid: 'setup-401',
+            title: '⚠️ Not authorized',
+            subtitle: detail,
             valid: false,
             icon: { path: 'icon.png' }
           })
         ]);
-      } catch (error) {
-        outputItems([
-          createItem({
-            uid: 'setup-connection-error',
-            title: '❌ Connection Failed',
-            subtitle: error.message || 'Could not connect to Beeper Desktop API',
-            valid: false,
-            icon: { path: 'icon.png' }
-          }),
-          createItem({
-            uid: 'setup-help-1',
-            title: '1. Make sure Beeper Desktop is running',
-            subtitle: 'Open Beeper Desktop application',
-            valid: false,
-            icon: { path: 'icon.png' }
-          }),
-          createItem({
-            uid: 'setup-help-2',
-            title: '2. Enable API in Settings',
-            subtitle: 'Settings (⌘,) → Developers → Toggle "Beeper Desktop API" ON',
-            valid: false,
-            icon: { path: 'icon.png' }
-          })
-        ]);
-      }
-    } else {
-      // No token provided - show setup instructions
-      const items = [];
-
-      if (currentToken) {
-        // Token already configured - test it
-        try {
-          const client = new BeeperClient(currentToken);
-          await client.testConnection();
-
-          items.push(
-            createItem({
-              uid: 'setup-configured',
-              title: '✅ Workflow Configured & Connected',
-              subtitle: 'Your Beeper token is working correctly!',
-              valid: false,
-              icon: { path: 'icon.png' }
-            }),
-            createItem({
-              uid: 'setup-token-info',
-              title: `🔑 Token: ${currentToken.substring(0, 20)}...`,
-              subtitle: 'Press ⌘C to copy full token',
-              valid: false,
-              text: {
-                copy: currentToken,
-                largetype: currentToken
-              },
-              icon: { path: 'icon.png' }
-            }),
-            createItem({
-              uid: 'setup-reconfigure',
-              title: '🔄 To Reconfigure',
-              subtitle: 'Click [≡] button → Configure Workflow... → Update token',
-              valid: false,
-              icon: { path: 'icon.png' }
-            })
-          );
-        } catch (error) {
-          items.push(
-            createItem({
-              uid: 'setup-error-connection',
-              title: '⚠️ Token Configured But Connection Failed',
-              subtitle: error.message || 'Check if Beeper Desktop is running',
-              valid: false,
-              icon: { path: 'icon.png' }
-            }),
-            createItem({
-              uid: 'setup-token-info',
-              title: `🔑 Current Token: ${currentToken.substring(0, 20)}...`,
-              subtitle: 'Press ⌘C to copy',
-              valid: false,
-              text: {
-                copy: currentToken,
-                largetype: currentToken
-              },
-              icon: { path: 'icon.png' }
-            }),
-            createItem({
-              uid: 'setup-help-1',
-              title: '1. Start Beeper Desktop',
-              subtitle: 'Open the Beeper Desktop application',
-              valid: false,
-              icon: { path: 'icon.png' }
-            }),
-            createItem({
-              uid: 'setup-help-2',
-              title: '2. Enable API',
-              subtitle: 'Settings (⌘,) → Developers → Toggle "Beeper Desktop API" ON',
-              valid: false,
-              icon: { path: 'icon.png' }
-            })
-          );
-        }
-      } else {
-        // No token configured - show initial setup
-        items.push(
-          createItem({
-            uid: 'setup-header',
-            title: '⚙️ Setup Beeper Alfred Workflow',
-            subtitle: 'Configure your Beeper Desktop API token',
-            valid: false,
-            icon: { path: 'icon.png' }
-          }),
-          createItem({
-            uid: 'setup-step-1',
-            title: '📍 Step 1: Enable API in Beeper Desktop',
-            subtitle: 'Open Beeper → Settings (⌘,) → Developers → Enable "Beeper Desktop API"',
-            valid: false,
-            icon: { path: 'icon.png' }
-          }),
-          createItem({
-            uid: 'setup-step-2',
-            title: '📍 Step 2: Copy Access Token',
-            subtitle: 'In Developers settings, copy your Access Token',
-            valid: false,
-            icon: { path: 'icon.png' }
-          }),
-          createItem({
-            uid: 'setup-step-3',
-            title: '📍 Step 3: Configure Workflow',
-            subtitle: 'Click [≡] button at top-right → Configure Workflow... → Paste token',
-            valid: false,
-            icon: { path: 'icon.png' }
-          }),
-          createItem({
-            uid: 'setup-step-4',
-            title: '📍 Optional: Validate Token First',
-            subtitle: 'Type "bp setup <paste-token>" to test before saving',
-            valid: false,
-            icon: { path: 'icon.png' }
-          })
-        );
+        return;
       }
 
-      outputItems(items);
+      outputItems([
+        createItem({
+          uid: 'setup-error',
+          title: '⚠️ Connection failed',
+          subtitle: error.message,
+          valid: false,
+          icon: { path: 'icon.png' }
+        }),
+        authorizeItem('🔐 Try authorizing', 'Press ↵ to authorize in your browser')
+      ]);
     }
-
   } catch (error) {
     outputError('Setup failed', error.message);
   }

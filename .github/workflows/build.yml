@@ -11,6 +11,13 @@ jobs:
     name: Build Alfred Workflow
     runs-on: macos-latest
 
+    # The PR-comment step posts an issue comment, which the default read-only
+    # GITHUB_TOKEN cannot do (403 "Resource not accessible by integration").
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -42,12 +49,63 @@ jobs:
 
       - name: Verify build output
         run: |
-          if [ ! -f dist/*.alfredworkflow ]; then
+          set -euo pipefail
+
+          # `[ ! -f dist/*.alfredworkflow ]` breaks when the glob expands, so
+          # count matches instead of testing the pattern directly.
+          shopt -s nullglob
+          builds=(dist/*.alfredworkflow)
+          if [ ${#builds[@]} -eq 0 ]; then
             echo "❌ Build failed - no .alfredworkflow file found"
             exit 1
           fi
-          echo "✅ Build successful"
+          WORKFLOW="${builds[0]}"
+          echo "✅ Built $WORKFLOW"
           ls -lh dist/
+
+          # The archive is what users actually install, so assert its contents
+          # rather than trusting that the build script did the right thing.
+          echo "--- verifying archive contents ---"
+          for required in info.plist src/index.js src/api/oauth.js src/utils/tokenStore.js; do
+            unzip -l "$WORKFLOW" | grep -q " $required$" \
+              || { echo "❌ missing $required"; exit 1; }
+            echo "  ✓ $required"
+          done
+
+          # The workflow runs with no install step on the user's machine, so a
+          # bundled node_modules would mean a runtime dependency crept back in.
+          if unzip -l "$WORKFLOW" | grep -q "node_modules/"; then
+            echo "❌ node_modules bundled - the workflow must stay dependency-free"
+            exit 1
+          fi
+          echo "  ✓ no node_modules"
+
+          if unzip -l "$WORKFLOW" | grep -qE "__tests__|\.test\.js"; then
+            echo "❌ tests bundled into the release artifact"
+            exit 1
+          fi
+          echo "  ✓ no tests"
+
+      - name: Verify the dead /v0 SDK has not returned
+        run: |
+          set -euo pipefail
+
+          # Current Beeper builds 404 every /v0/* route; the @beeper/desktop-api
+          # SDK only speaks /v0. Reintroducing either breaks every command.
+          if grep -rn "@beeper/desktop-api" src --include='*.js' | grep -v '^\s*\*' | grep -v ' \* '; then
+            echo "❌ SDK reference found in src/ - use client.v1() instead"
+            exit 1
+          fi
+          if grep -rn "'/v0/\|\"/v0/" src --include='*.js'; then
+            echo "❌ /v0/ route found in src/ - current builds return 404"
+            exit 1
+          fi
+          if node -e "process.exit(Object.keys(require('./package.json').dependencies || {}).length ? 1 : 0)"; then
+            echo "✅ no runtime dependencies, no /v0 usage"
+          else
+            echo "❌ package.json gained a runtime dependency"
+            exit 1
+          fi
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
@@ -64,8 +122,11 @@ jobs:
           path: dist/*.alfredworkflow
           retention-days: 90
 
+      # Convenience only — a failure to comment must not fail a good build
+      # (e.g. PRs from forks, where the token is read-only regardless).
       - name: Comment download link on PR
         if: github.event_name == 'pull_request'
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |

@@ -13,26 +13,10 @@ const DIST_DIR = path.join(__dirname, '..', 'dist');
 const WORKFLOW_NAME = 'beeper-alfred.alfredworkflow';
 const OUTPUT_PATH = path.join(DIST_DIR, WORKFLOW_NAME);
 
-// Files and directories to include in the workflow
-const INCLUDE_PATTERNS = [
-  'src/**/*.js',
-  'icons/**/*',
-  'info.plist',
-  'package.json',
-  'package-lock.json',
-  'node_modules/@beeper/**/*',
-  'README.md',
-  'LICENSE'
-];
-
-// Files and directories to exclude
-const EXCLUDE_PATTERNS = [
-  'node_modules/**/*',
-  '!node_modules/@beeper/**/*', // Keep only @beeper/desktop-api
-  '**/.DS_Store',
-  '**/._*',
-  '**/*.log'
-];
+// The workflow has no runtime dependencies — everything it needs is in src/.
+// node_modules is deliberately NOT bundled: the @beeper/desktop-api SDK was
+// removed because it targets the dead /v0/* routes, and the remaining packages
+// are dev-only tooling (eslint, jest, archiver).
 
 async function buildWorkflow() {
   console.log('🔨 Building Alfred workflow...\n');
@@ -87,10 +71,11 @@ async function buildWorkflow() {
     console.log('\n📦 Adding files to workflow:');
 
     // Add source files
-    archive.directory('src/', 'src/', {
-      filter: (file) => !file.endsWith('.test.js')
+    // Ship runtime code only — tests add weight and never execute in Alfred
+    archive.glob('src/**/*.js', {
+      ignore: ['src/__tests__/**', 'src/**/*.test.js']
     });
-    console.log('  ✓ src/');
+    console.log('  ✓ src/ (excluding tests)');
 
     // Add icons if they exist
     if (fs.existsSync('icons')) {
@@ -134,14 +119,7 @@ async function buildWorkflow() {
       console.warn('  ⚠️  icon.png not found');
     }
 
-    // Add only @beeper/desktop-api from node_modules
-    const beeperApiPath = path.join('node_modules', '@beeper');
-    if (fs.existsSync(beeperApiPath)) {
-      archive.directory(beeperApiPath, 'node_modules/@beeper/');
-      console.log('  ✓ node_modules/@beeper/');
-    } else {
-      console.warn('  ⚠️  @beeper/desktop-api not found in node_modules');
-    }
+    // No node_modules: the workflow is dependency-free at runtime.
 
     archive.finalize();
   });

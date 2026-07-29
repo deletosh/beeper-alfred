@@ -30,51 +30,6 @@
 	<false/>
 	<key>name</key>
 	<string>Beeper for Alfred</string>
-	<key>userconfigurationconfig</key>
-	<array>
-		<dict>
-			<key>config</key>
-			<dict>
-				<key>default</key>
-				<string></string>
-				<key>placeholder</key>
-				<string>Paste your Beeper Desktop API token here</string>
-				<key>required</key>
-				<true/>
-				<key>trim</key>
-				<true/>
-			</dict>
-			<key>description</key>
-			<string>Get your token from Beeper Desktop → Settings → Developers → Enable "Beeper Desktop API"</string>
-			<key>label</key>
-			<string>Beeper Access Token</string>
-			<key>type</key>
-			<string>textfield</string>
-			<key>variable</key>
-			<string>BEEPER_ACCESS_TOKEN</string>
-		</dict>
-		<dict>
-			<key>config</key>
-			<dict>
-				<key>default</key>
-				<string>http://localhost:23373</string>
-				<key>placeholder</key>
-				<string>http://localhost:23373</string>
-				<key>required</key>
-				<false/>
-				<key>trim</key>
-				<true/>
-			</dict>
-			<key>description</key>
-			<string>Beeper Desktop API URL (default: http://localhost:23373)</string>
-			<key>label</key>
-			<string>API URL</string>
-			<key>type</key>
-			<string>textfield</string>
-			<key>variable</key>
-			<string>BEEPER_API_URL</string>
-		</dict>
-	</array>
 	<key>objects</key>
 	<array>
 		<dict>
@@ -105,25 +60,53 @@
 				<key>runningsubtext</key>
 				<string>Loading...</string>
 				<key>script</key>
-				<string># Route based on first argument
+				<string># Alfred runs scripts with a minimal PATH that excludes Homebrew, nvm, fnm and
+# Volta, so a bare `node` fails with "command not found". Resolve it explicitly.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+NODE_BIN="$(command -v node 2&gt;/dev/null)"
+
+if [ -z "$NODE_BIN" ]; then
+  for candidate in \
+    "$HOME/.volta/bin/node" \
+    "$HOME/.fnm/aliases/default/bin/node" \
+    "$HOME/.nvm/alias/default/bin/node" \
+    "$HOME/.local/share/fnm/aliases/default/bin/node"; do
+    if [ -x "$candidate" ]; then NODE_BIN="$candidate"; break; fi
+  done
+fi
+
+# nvm installs are versioned; take the highest version present
+if [ -z "$NODE_BIN" ] &amp;&amp; [ -d "$HOME/.nvm/versions/node" ]; then
+  NODE_BIN="$(ls -1 "$HOME/.nvm/versions/node" 2&gt;/dev/null | sort -V | tail -1)"
+  [ -n "$NODE_BIN" ] &amp;&amp; NODE_BIN="$HOME/.nvm/versions/node/$NODE_BIN/bin/node"
+  [ -x "$NODE_BIN" ] || NODE_BIN=""
+fi
+
+if [ -z "$NODE_BIN" ]; then
+  printf '%s\n' '{"items":[{"title":"Node.js not found","subtitle":"Install Node 20+ (e.g. brew install node), then try again","valid":false}]}'
+  exit 0
+fi
+
+# Route based on first argument
 if [ -z "$1" ]; then
   # No argument - show menu
-  node src/index.js menu
+  "$NODE_BIN" src/index.js menu
 else
   # Has argument - parse subcommand
   cmd=$(echo "$1" | awk '{print $1}')
   args=$(echo "$1" | cut -d' ' -f2-)
 
   case "$cmd" in
-    search|send|unread|recent|setup)
+    search|send|contact|unread|recent|setup)
       if [ "$cmd" = "$args" ]; then
-        node src/index.js "$cmd"
+        "$NODE_BIN" src/index.js "$cmd"
       else
-        node src/index.js "$cmd" "$args"
+        "$NODE_BIN" src/index.js "$cmd" "$args"
       fi
       ;;
     *)
-      node src/index.js menu "$1"
+      "$NODE_BIN" src/index.js menu "$1"
       ;;
   esac
 fi</string>
@@ -155,9 +138,37 @@ fi</string>
 				<key>escaping</key>
 				<integer>102</integer>
 				<key>script</key>
-				<string># Pass the raw pipe-delimited string to Node.js
+				<string># Alfred runs scripts with a minimal PATH that excludes Homebrew, nvm, fnm and
+# Volta, so a bare `node` fails with "command not found". Resolve it explicitly.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+NODE_BIN="$(command -v node 2&gt;/dev/null)"
+
+if [ -z "$NODE_BIN" ]; then
+  for candidate in \
+    "$HOME/.volta/bin/node" \
+    "$HOME/.fnm/aliases/default/bin/node" \
+    "$HOME/.nvm/alias/default/bin/node" \
+    "$HOME/.local/share/fnm/aliases/default/bin/node"; do
+    if [ -x "$candidate" ]; then NODE_BIN="$candidate"; break; fi
+  done
+fi
+
+# nvm installs are versioned; take the highest version present
+if [ -z "$NODE_BIN" ] &amp;&amp; [ -d "$HOME/.nvm/versions/node" ]; then
+  NODE_BIN="$(ls -1 "$HOME/.nvm/versions/node" 2&gt;/dev/null | sort -V | tail -1)"
+  [ -n "$NODE_BIN" ] &amp;&amp; NODE_BIN="$HOME/.nvm/versions/node/$NODE_BIN/bin/node"
+  [ -x "$NODE_BIN" ] || NODE_BIN=""
+fi
+
+if [ -z "$NODE_BIN" ]; then
+  echo "Node.js not found. Install Node 20+ (e.g. brew install node)." &gt;&amp;2
+  exit 1
+fi
+
+# Pass the raw pipe-delimited string to Node.js
 # Node.js will handle the splitting
-node src/index.js action-raw "$1"</string>
+"$NODE_BIN" src/index.js action-raw "$1"</string>
 				<key>scriptargtype</key>
 				<integer>1</integer>
 				<key>scriptfile</key>
@@ -232,21 +243,66 @@ Add `:network` to filter by platform:
 For more help, visit: https://github.com/deletosh/beeper-alfred</string>
 	<key>uidata</key>
 	<dict>
-		<key>F7E9A8B1-3C4D-4E5F-9A0B-1C2D3E4F5A6B</key>
-		<dict>
-			<key>xpos</key>
-			<real>50</real>
-			<key>ypos</key>
-			<real>50</real>
-		</dict>
 		<key>ACTION-HANDLER-UUID</key>
 		<dict>
 			<key>xpos</key>
-			<real>250</real>
+			<real>250.0</real>
 			<key>ypos</key>
-			<real>50</real>
+			<real>50.0</real>
+		</dict>
+		<key>F7E9A8B1-3C4D-4E5F-9A0B-1C2D3E4F5A6B</key>
+		<dict>
+			<key>xpos</key>
+			<real>50.0</real>
+			<key>ypos</key>
+			<real>50.0</real>
 		</dict>
 	</dict>
+	<key>userconfigurationconfig</key>
+	<array>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string></string>
+				<key>placeholder</key>
+				<string>Leave empty — run "bp setup" instead</string>
+				<key>required</key>
+				<false/>
+				<key>trim</key>
+				<true/>
+			</dict>
+			<key>description</key>
+			<string>Leave empty. Authorization happens via "bp setup", which uses OAuth. A value here overrides the OAuth token and will shadow it if stale.</string>
+			<key>label</key>
+			<string>Access Token (optional override)</string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>BEEPER_ACCESS_TOKEN</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>http://localhost:23373</string>
+				<key>placeholder</key>
+				<string>http://localhost:23373</string>
+				<key>required</key>
+				<false/>
+				<key>trim</key>
+				<true/>
+			</dict>
+			<key>description</key>
+			<string>Beeper Desktop API URL (default: http://localhost:23373)</string>
+			<key>label</key>
+			<string>API URL</string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>BEEPER_API_URL</string>
+		</dict>
+	</array>
 	<key>version</key>
 	<string>1.0.0</string>
 	<key>webaddress</key>

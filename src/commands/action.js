@@ -3,7 +3,10 @@
  * Handle actions from Alfred results (open, archive, send, etc.)
  */
 
+const { exec } = require('child_process');
 const BeeperClient = require('../api/client');
+const { authorize: runOAuth } = require('../api/oauth');
+const { saveToken } = require('../utils/tokenStore');
 
 /**
  * Action command handler
@@ -42,8 +45,20 @@ async function action(args) {
     case 'send-message':
       await sendMessage(actionParams);
       break;
-    case 'create-chat':
-      await createChat(actionParams);
+    case 'start-chat':
+      await startChat(actionParams);
+      break;
+    case 'send-new':
+      await sendToNewChat(actionParams);
+      break;
+    case 'compose':
+      await compose(actionParams);
+      break;
+    case 'copy-text':
+      // Handled by Alfred's clipboard output; no API call needed
+      break;
+    case 'authorize':
+      await authorize();
       break;
     default:
       console.error(`Unknown action: ${actionType}`);
@@ -147,7 +162,8 @@ async function quickReply(params) {
  */
 async function sendMessage(params) {
   const [chatId, ...messageParts] = params;
-  const messageText = messageParts.join(' ');
+  // Rejoin on '|' so a message containing pipes survives the split in index.js
+  const messageText = messageParts.join('|');
 
   if (!chatId) {
     throw new Error('Chat ID is required');
@@ -158,39 +174,144 @@ async function sendMessage(params) {
   }
 
   const client = new BeeperClient();
-  await client.sendMessage(chatId, messageText);
+  await client.sendMessageV1(chatId, messageText);
 }
 
 /**
- * Create a new chat and open it
+ * Decode a base64-encoded contact payload passed through the Alfred arg
+ * @param {string} encoded - base64 JSON
+ * @returns {Object} Contact payload
  */
-async function createChat(params) {
-  const [accountId, userId] = params;
+function decodeUser(encoded) {
+  try {
+    return JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'));
+  } catch {
+    throw new Error('Could not read the selected contact');
+  }
+}
 
-  console.error(`createChat called with accountId: ${accountId}, userId: ${userId}`);
+/**
+ * Start a chat with a contact and open it in Beeper
+ */
+async function startChat(params) {
+  const [accountId, encodedUser] = params;
 
   if (!accountId) {
     throw new Error('Account ID is required');
   }
 
-  if (!userId) {
-    throw new Error('User ID is required');
+  if (!encodedUser) {
+    throw new Error('Contact is required');
+  }
+
+  const client = new BeeperClient();
+  const chat = await client.startChat(accountId, decodeUser(encodedUser));
+  const chatId = chat?.id || chat?.chatID;
+
+  if (!chatId) {
+    throw new Error('Could not start a chat with this contact');
+  }
+
+  await client.focus({ chatID: chatId });
+}
+
+/**
+ * Start a chat with a contact and send the first message
+ */
+async function sendToNewChat(params) {
+  const [accountId, encodedUser, ...messageParts] = params;
+  // Rejoin on '|' so a message containing pipes survives the split in index.js
+  const messageText = messageParts.join('|');
+
+  if (!accountId) {
+    throw new Error('Account ID is required');
+  }
+
+  if (!encodedUser) {
+    throw new Error('Contact is required');
+  }
+
+  if (!messageText) {
+    throw new Error('Message text is required');
   }
 
   const client = new BeeperClient();
 
-  // Create the chat
-  console.error('Creating new chat...');
-  const newChat = await client.createChat(accountId, userId);
-  console.error(`Chat created: ${JSON.stringify(newChat)}`);
+  // start-chat reuses an existing DM when there is one, in which case messageText
+  // is not delivered. Resolve the chat first, then send explicitly — one send
+  // path means no risk of double-posting.
+  const chat = await client.startChat(accountId, decodeUser(encodedUser));
+  const chatId = chat?.id || chat?.chatID;
 
-  // Open the newly created chat
-  const chatId = newChat.chatID || newChat.id;
-  if (chatId) {
-    console.error(`Opening chat: ${chatId}`);
-    await client.openInBeeper(chatId);
-  } else {
-    console.error('Warning: No chat ID returned from createChat');
+  if (!chatId) {
+    throw new Error('Could not start a chat with this contact');
+  }
+
+  await client.sendMessageV1(chatId, messageText);
+}
+
+/**
+ * Open a chat in Beeper with the message box pre-filled
+ */
+async function compose(params) {
+  const [chatId, ...draftParts] = params;
+  const draftText = draftParts.join('|');
+
+  if (!chatId) {
+    throw new Error('Chat ID is required');
+  }
+
+  const client = new BeeperClient();
+  await client.focus({ chatID: chatId, draftText: draftText || undefined });
+}
+
+/**
+ * Post a macOS notification.
+ * Actions have no Alfred UI, and the OAuth flow is slow enough that silent
+ * success or failure would be indistinguishable from nothing happening.
+ * @param {string} title - Notification title
+ * @param {string} message - Notification body
+ * @returns {Promise<void>}
+ */
+function notify(title, message) {
+  return new Promise((resolve) => {
+    // JSON.stringify escapes quotes so a message can't break out of the script
+    const script = `display notification ${JSON.stringify(message)} with title ${JSON.stringify(title)}`;
+    exec(`osascript -e ${JSON.stringify(script)}`, () => resolve());
+  });
+}
+
+/**
+ * Run the OAuth authorization flow and persist the resulting token.
+ * Blocks while the user approves the consent page in their browser.
+ */
+async function authorize() {
+  const apiUrl = process.env.BEEPER_API_URL || 'http://localhost:23373';
+
+  try {
+    const token = await runOAuth({ baseUrl: apiUrl });
+    saveToken(token);
+
+    // Prove the token actually works before claiming success
+    const client = new BeeperClient(token.access_token);
+    const accounts = await client.getAccounts();
+
+    await notify(
+      'Beeper for Alfred',
+      `Connected — ${accounts.length} account${accounts.length === 1 ? '' : 's'} available`
+    );
+  } catch (error) {
+    await notify('Beeper for Alfred', `Authorization failed: ${error.message}`);
+    throw error;
+  }
+
+  if (process.env.BEEPER_ACCESS_TOKEN) {
+    // A stale workflow variable outranks the new token in getAccessToken(),
+    // so warn rather than let commands keep failing with 401 after success.
+    await notify(
+      'Beeper for Alfred',
+      'Clear the BEEPER_ACCESS_TOKEN workflow variable — it overrides the new authorization'
+    );
   }
 }
 
