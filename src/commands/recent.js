@@ -5,6 +5,7 @@
 
 const { createItem, outputItems, outputError, createInfoItem } = require('../utils/alfred');
 const BeeperClient = require('../api/client');
+const { getAccessToken } = require('../utils/tokenStore');
 const { formatRelativeTime, truncateText } = require('../utils/formatters');
 const { getNetworkInfo } = require('../config/networks');
 
@@ -13,8 +14,8 @@ const { getNetworkInfo } = require('../config/networks');
  */
 async function recent() {
   try {
-    // Check if token is configured
-    if (!process.env.BEEPER_ACCESS_TOKEN) {
+    // Covers both the workflow variable and the token saved by bp setup
+    if (!getAccessToken()) {
       outputItems([
         createItem({
           uid: 'recent-no-token',
@@ -89,7 +90,7 @@ async function recent() {
           'Open the Beeper Desktop application and enable API in Settings'
         )
       ]);
-    } else if (error.message.includes('401')) {
+    } else if (error.status === 401) {
       outputItems([
         createItem({
           uid: 'recent-invalid-token',

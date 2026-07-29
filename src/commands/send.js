@@ -5,6 +5,7 @@
 
 const { createItem, outputItems, outputError, createInfoItem } = require('../utils/alfred');
 const BeeperClient = require('../api/client');
+const { getAccessToken } = require('../utils/tokenStore');
 const { formatRelativeTime, truncateText } = require('../utils/formatters');
 const { getNetworkInfo } = require('../config/networks');
 
@@ -26,8 +27,8 @@ async function send(args) {
       return;
     }
 
-    // Check if token is configured
-    if (!process.env.BEEPER_ACCESS_TOKEN) {
+    // Covers both the workflow variable and the token saved by bp setup
+    if (!getAccessToken()) {
       outputItems([
         createItem({
           uid: 'send-no-token',
@@ -83,11 +84,19 @@ async function send(args) {
       );
 
       if (!existingChat) {
+        const encodedUser = Buffer.from(JSON.stringify({
+          id: contact.id,
+          username: contact.username,
+          phoneNumber: contact.phoneNumber,
+          email: contact.email,
+          fullName: contact.fullName
+        }), 'utf8').toString('base64');
+
         items.push(createItem({
           uid: `send-contact-${contact.accountID}-${contact.id}`,
           title: `👤 ${contactName}`,
           subtitle: `${network.emoji || ''} ${network.name} • New conversation`,
-          arg: `create-chat|${contact.accountID}|${contact.id}`,
+          arg: `start-chat|${contact.accountID}|${encodedUser}`,
           valid: true,
           text: {
             copy: contactName,
@@ -125,7 +134,7 @@ async function send(args) {
           'Open the Beeper Desktop application and enable API in Settings'
         )
       ]);
-    } else if (error.message.includes('401')) {
+    } else if (error.status === 401) {
       outputItems([
         createItem({
           uid: 'send-invalid-token',

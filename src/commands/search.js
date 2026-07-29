@@ -5,6 +5,7 @@
 
 const { createItem, outputItems, outputError, createInfoItem } = require('../utils/alfred');
 const BeeperClient = require('../api/client');
+const { getAccessToken } = require('../utils/tokenStore');
 const { formatRelativeTime, truncateText } = require('../utils/formatters');
 const { getNetworkInfo } = require('../config/networks');
 
@@ -26,8 +27,8 @@ async function search(args) {
       return;
     }
 
-    // Check if token is configured
-    if (!process.env.BEEPER_ACCESS_TOKEN) {
+    // Covers both the workflow variable and the token saved by bp setup
+    if (!getAccessToken()) {
       outputItems([
         createItem({
           uid: 'search-no-token',
@@ -140,7 +141,7 @@ async function search(args) {
           'Open the Beeper Desktop application and enable API in Settings'
         )
       ]);
-    } else if (error.message.includes('401')) {
+    } else if (error.status === 401) {
       outputItems([
         createItem({
           uid: 'search-invalid-token',

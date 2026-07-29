@@ -27,6 +27,14 @@ function menu() {
       icon: { path: 'icon.png' }
     }),
     createItem({
+      uid: 'menu-contact',
+      title: '👤 Find Contact',
+      subtitle: 'Search a person across all networks and pick where to message them',
+      autocomplete: 'contact ',
+      valid: false,
+      icon: { path: 'icon.png' }
+    }),
+    createItem({
       uid: 'menu-unread',
       title: '📬 Unread Inbox',
       subtitle: 'View and manage unread messages',

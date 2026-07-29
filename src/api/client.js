@@ -1,24 +1,37 @@
 /**
  * Beeper API Client
- * Wrapper around @beeper/desktop-api with helper methods
+ *
+ * Talks to the Beeper Desktop REST API (/v1/*) directly via src/api/http.js.
+ * The @beeper/desktop-api SDK is deliberately not used: it targets the older
+ * RPC-style /v0/* routes, which return 404 on current Beeper builds.
  */
 
-const BeeperDesktop = require('@beeper/desktop-api');
+const { request } = require('./http');
+const { getAccessToken } = require('../utils/tokenStore');
 
 class BeeperClient {
   constructor(accessToken = null) {
-    // Get token from environment or parameter
-    this.accessToken = accessToken || process.env.BEEPER_ACCESS_TOKEN;
+    // Explicit argument wins, then the workflow variable, then the OAuth token
+    // saved by `bp setup` (see src/utils/tokenStore.js).
+    this.accessToken = accessToken || getAccessToken();
     this.apiUrl = process.env.BEEPER_API_URL || 'http://localhost:23373';
-    
-    if (!this.accessToken) {
-      throw new Error('BEEPER_ACCESS_TOKEN not configured. Run: bp setup');
-    }
 
-    // Initialize SDK client
-    this.client = new BeeperDesktop({
-      accessToken: this.accessToken,
-      baseURL: this.apiUrl
+    if (!this.accessToken) {
+      throw new Error('Not authorized with Beeper. Run: bp setup');
+    }
+  }
+
+  /**
+   * Call the Beeper Desktop v1 REST API directly.
+   * Current Beeper builds serve /v1/*; the pinned SDK still targets /v0/*.
+   * @param {Object} options - See src/api/http.js
+   * @returns {Promise<*>} Parsed response
+   */
+  v1(options) {
+    return request({
+      ...options,
+      token: this.accessToken,
+      baseUrl: this.apiUrl
     });
   }
 
@@ -28,10 +41,11 @@ class BeeperClient {
    */
   async testConnection() {
     try {
-      await this.client.accounts.list();
+      await this.v1({ path: '/v1/accounts' });
       return true;
     } catch (error) {
-      if (error.code === 'ECONNREFUSED') {
+      // http.js surfaces connection failures as an ECONNREFUSED-prefixed message
+      if (error.code === 'ECONNREFUSED' || error.message.includes('ECONNREFUSED')) {
         throw new Error('Beeper Desktop not running. Please start the app.');
       }
       throw error;
@@ -44,8 +58,10 @@ class BeeperClient {
    * @returns {Promise<Object>} Search results with chats, in_groups, and messages
    */
   async globalSearch(query) {
-    // Use the SDK's app.search method (uses /v0/search endpoint)
-    const results = await this.client.app.search({ query });
+    const results = await this.v1({
+      path: '/v1/search',
+      query: { query }
+    });
 
     return {
       chats: results.results?.chats || [],
@@ -70,13 +86,12 @@ class BeeperClient {
       limit = 20
     } = options;
 
-    const results = await this.client.messages.search({
-      query,
-      accountIDs,
-      limit
+    const results = await this.v1({
+      path: '/v1/messages/search',
+      query: { query, accountIDs, limit }
     });
 
-    return results.items || [];
+    return results?.items || [];
   }
 
   /**
@@ -103,9 +118,12 @@ class BeeperClient {
       // Need to get account IDs for specific network
     }
 
-    const results = await this.client.chats.search(searchParams);
+    const results = await this.v1({
+      path: '/v1/chats/search',
+      query: searchParams
+    });
 
-    return results.items || [];
+    return results?.items || [];
   }
 
   /**
@@ -120,13 +138,12 @@ class BeeperClient {
       type = 'any' // 'single', 'group', or 'any'
     } = options;
 
-    const results = await this.client.chats.search({
-      query,
-      limit,
-      type
+    const results = await this.v1({
+      path: '/v1/chats/search',
+      query: { query, limit, type }
     });
 
-    return results.items || [];
+    return results?.items || [];
   }
 
   /**
@@ -135,12 +152,12 @@ class BeeperClient {
    * @returns {Promise<Array>} Array of recent chats
    */
   async getRecentChats(limit = 10) {
-    const results = await this.client.chats.search({
-      limit,
-      inbox: 'primary'
+    const results = await this.v1({
+      path: '/v1/chats/search',
+      query: { limit, inbox: 'primary' }
     });
 
-    return results.items || [];
+    return results?.items || [];
   }
 
   /**
@@ -150,13 +167,9 @@ class BeeperClient {
    * @param {Array} attachments - File attachments (optional)
    * @returns {Promise<Object>} Send result
    */
-  async sendMessage(chatId, text, _attachments = []) {
+  sendMessage(chatId, text, _attachments = []) {
     // TODO: Handle attachments when API supports it
-    const result = await this.client.messages.send(chatId, {
-      text
-    });
-
-    return result;
+    return this.sendMessageV1(chatId, text);
   }
 
   /**
@@ -166,8 +179,10 @@ class BeeperClient {
    * @returns {Promise<void>}
    */
   async archiveChat(chatId, archived = true) {
-    await this.client.chats.archive(chatId, {
-      archived
+    await this.v1({
+      method: 'POST',
+      path: `/v1/chats/${encodeURIComponent(chatId)}/archive`,
+      body: { archived }
     });
   }
 
@@ -177,26 +192,14 @@ class BeeperClient {
    * @param {string} messageId - Message ID (optional)
    * @returns {Promise<void>}
    */
-  async openInBeeper(chatId, messageId = null) {
-    console.error(`[BeeperClient] openInBeeper called with chatId=${chatId}, messageId=${messageId}`);
-
+  openInBeeper(chatId, messageId = null) {
     const focusParams = { chatID: chatId };
 
     if (messageId) {
       focusParams.messageID = messageId;
     }
 
-    console.error('[BeeperClient] Calling focus with params:', JSON.stringify(focusParams));
-
-    try {
-      // SDK doesn't have focus() method yet, so we make a direct POST request to /v1/focus
-      const result = await this.client.post('/v1/focus', { body: focusParams });
-      console.error('[BeeperClient] focus result:', JSON.stringify(result));
-      return result;
-    } catch (error) {
-      console.error('[BeeperClient] focus error:', error.message);
-      throw error;
-    }
+    return this.focus(focusParams);
   }
 
   /**
@@ -204,8 +207,8 @@ class BeeperClient {
    * @returns {Promise<Array>} Array of accounts
    */
   async getAccounts() {
-    const results = await this.client.accounts.list();
-    // accounts.list() returns an array directly, not wrapped in an object
+    // GET /v1/accounts returns an array directly, not wrapped in an object
+    const results = await this.v1({ path: '/v1/accounts' });
     return results || [];
   }
 
@@ -215,7 +218,7 @@ class BeeperClient {
    * @returns {Promise<Object>} Chat object
    */
   getChat(chatId) {
-    return this.client.chats.retrieve(chatId);
+    return this.v1({ path: `/v1/chats/${encodeURIComponent(chatId)}` });
   }
 
   /**
@@ -225,29 +228,43 @@ class BeeperClient {
    * @returns {Promise<Array>} Array of contacts (User objects)
    */
   async searchContacts(accountId, query) {
-    const results = await this.client.accounts.contacts.search(accountId, { query });
-    return results.items || [];
+    const results = await this.v1({
+      path: `/v1/accounts/${encodeURIComponent(accountId)}/contacts`,
+      query: { query }
+    });
+    return results?.items || [];
   }
 
   /**
-   * Search contacts across all accounts (grouped by account)
+   * Search contacts across every connected account, in parallel.
+   * A failing network (unsupported search, disconnected bridge) is skipped
+   * rather than failing the whole lookup.
+   *
+   * Results are capped per account: GET /v1/accounts/{id}/contacts takes no
+   * limit parameter, so a short query like "a" can match thousands of contacts
+   * per network. Rendering all of them overflows the 128 KB pipe Alfred reads
+   * a Script Filter's output through, which truncates the JSON and shows the
+   * user nothing at all.
    * @param {string} query - Search query
-   * @returns {Promise<Array>} Array of contacts with account info
+   * @param {number} perAccountLimit - Max contacts to keep from each account
+   * @returns {Promise<Array>} Array of contacts annotated with accountID/network
    */
-  async searchContactsGlobal(query) {
-    // Get all accounts first
+  async searchContactsGlobal(query, perAccountLimit = 20) {
     const accounts = await this.getAccounts();
 
-    // Search contacts in each account
     const contactsByAccount = await Promise.all(
       accounts.map(async (account) => {
         try {
           const contacts = await this.searchContacts(account.accountID, query);
-          return contacts.map(contact => ({
-            ...contact,
-            accountID: account.accountID,
-            network: account.network
-          }));
+          return contacts
+            // Never offer to message yourself
+            .filter(contact => !contact.isSelf)
+            .slice(0, perAccountLimit)
+            .map(contact => ({
+              ...contact,
+              accountID: account.accountID,
+              network: account.network
+            }));
         } catch (error) {
           console.error(`Failed to search contacts in ${account.network}:`, error.message);
           return [];
@@ -255,22 +272,61 @@ class BeeperClient {
       })
     );
 
-    // Flatten results
     return contactsByAccount.flat();
   }
 
   /**
-   * Create a new chat with a user
-   * @param {string} accountId - Account ID to create chat in
-   * @param {string} userId - User ID to chat with
-   * @returns {Promise<Object>} Created chat object
+   * Start (or reuse) a 1:1 chat with a contact.
+   * POST /v1/chats/start resolves the best identifier for the network, so pass
+   * through whatever the contact search returned rather than only the ID.
+   * @param {string} accountId - Account to start the chat on
+   * @param {Object} user - Contact payload ({id, username, phoneNumber, email, fullName})
+   * @param {string} messageText - Optional first message, if the network requires one
+   * @returns {Promise<Object>} Chat object (includes id and chatID alias)
    */
-  async createChat(accountId, userId) {
-    const result = await this.client.chats.create({
+  startChat(accountId, user, messageText = null) {
+    const body = {
       accountID: accountId,
-      userIDs: [userId]
+      user: {
+        id: user.id,
+        username: user.username,
+        phoneNumber: user.phoneNumber,
+        email: user.email,
+        fullName: user.fullName
+      }
+    };
+
+    // Drop undefined identifier hints so the resolver isn't given empty values
+    Object.keys(body.user).forEach(k => body.user[k] === undefined && delete body.user[k]);
+
+    if (messageText) {
+      body.messageText = messageText;
+    }
+
+    return this.v1({ method: 'POST', path: '/v1/chats/start', body });
+  }
+
+  /**
+   * Send a message to an existing chat
+   * @param {string} chatId - Chat ID
+   * @param {string} text - Message text
+   * @returns {Promise<Object>} Send result
+   */
+  sendMessageV1(chatId, text) {
+    return this.v1({
+      method: 'POST',
+      path: `/v1/chats/${encodeURIComponent(chatId)}/messages`,
+      body: { text }
     });
-    return result;
+  }
+
+  /**
+   * Focus Beeper Desktop, optionally on a chat and with a prefilled draft
+   * @param {Object} params - {chatID, messageID, draftText}
+   * @returns {Promise<Object>} Focus result
+   */
+  focus(params) {
+    return this.v1({ method: 'POST', path: '/v1/focus', body: params });
   }
 }
 

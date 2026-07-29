@@ -12,6 +12,7 @@ const COMMANDS = {
   menu: require('./commands/menu'),
   search: require('./commands/search'),
   send: require('./commands/send'),
+  contact: require('./commands/contact'),
   unread: require('./commands/unread'),
   recent: require('./commands/recent'),
   setup: require('./commands/setup'),
