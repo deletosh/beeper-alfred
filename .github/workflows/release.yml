@@ -26,8 +26,11 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
+      # NOT --production: the workflow ships zero runtime dependencies, so
+      # that flag installs nothing and the build fails on a missing archiver,
+      # which is a devDependency.
       - name: Install dependencies
-        run: npm ci --production
+        run: npm ci
 
       - name: Get version
         id: get_version
@@ -38,9 +41,13 @@ jobs:
             echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
           fi
 
+      # --allow-same-version: releasing a tag that matches the version already
+      # in package.json is normal, and npm version exits 1 on "not changed",
+      # which would abort the release.
       - name: Update version in package.json
         run: |
-          npm version ${{ steps.get_version.outputs.version }} --no-git-tag-version
+          npm version ${{ steps.get_version.outputs.version }} \
+            --no-git-tag-version --allow-same-version
 
       - name: Generate icons
         run: npm run generate-icons || echo "Icon generation skipped (optional)"
@@ -64,8 +71,13 @@ jobs:
       contents: write
 
     steps:
+      # Full history and tags: the changelog step runs git describe/git log,
+      # which produce nothing under the default depth-1 shallow checkout.
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Get version
         id: get_version
@@ -85,29 +97,46 @@ jobs:
       - name: Generate changelog
         id: changelog
         run: |
-          echo "## What's Changed" > changelog.md
-          echo "" >> changelog.md
+          set -euo pipefail
+          VERSION="v${{ steps.get_version.outputs.version }}"
 
-          # Get commits since last tag
-          LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          {
+            echo "## What's Changed"
+            echo ""
+          } > changelog.md
+
+          # Previous tag excluding this release's own tag. On a first release
+          # there is none, so list the full history instead of an empty range.
+          LAST_TAG=$(git tag --sort=-creatordate | grep -v "^${VERSION}$" | head -1 || true)
           if [ -z "$LAST_TAG" ]; then
             git log --pretty=format:"* %s (%h)" >> changelog.md
           else
-            git log ${LAST_TAG}..HEAD --pretty=format:"* %s (%h)" >> changelog.md
+            git log "${LAST_TAG}..HEAD" --pretty=format:"* %s (%h)" >> changelog.md
           fi
 
-          echo "" >> changelog.md
-          echo "" >> changelog.md
-          echo "## Installation" >> changelog.md
-          echo "" >> changelog.md
-          echo "1. Download the \`beeper-alfred.alfredworkflow\` file below" >> changelog.md
-          echo "2. Double-click to install in Alfred" >> changelog.md
-          echo "3. Run \`bp setup\` in Alfred to configure your Beeper API token" >> changelog.md
-          echo "" >> changelog.md
-          echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$LAST_TAG...v${{ steps.get_version.outputs.version }}" >> changelog.md
+          {
+            echo ""
+            echo ""
+            echo "## Installation"
+            echo ""
+            echo "1. Download \`beeper-alfred.alfredworkflow\` below"
+            echo "2. Double-click it to install in Alfred"
+            echo "3. Run \`bp setup\` in Alfred and press ↵ on \"Connect Alfred to Beeper\""
+            echo ""
+            echo "Authorization uses OAuth — Beeper opens a consent page in your"
+            echo "browser. There is no token to copy or paste."
+            echo ""
+            echo "**Requires:** Alfred 5 with Powerpack, Node.js 20+, Beeper Desktop"
+          } >> changelog.md
+
+          # A compare link needs two refs; on a first release there is only one.
+          if [ -n "$LAST_TAG" ]; then
+            echo "" >> changelog.md
+            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${LAST_TAG}...${VERSION}" >> changelog.md
+          fi
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.get_version.outputs.version }}
           name: Release v${{ steps.get_version.outputs.version }}

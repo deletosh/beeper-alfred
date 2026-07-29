@@ -26,49 +26,70 @@ Search across **all your messaging networks** in one place. Find chats, groups, 
 
 ## 🚀 Quick Start
 
-1. **Install** - Download and double-click `Beeper.alfredworkflow`
-2. **Enable API** - Open Beeper → Settings → Developers → Toggle "Beeper Desktop API" ON
-3. **Configure** - Run `bp setup` in Alfred and paste your access token
+1. **Install** - Download and double-click `beeper-alfred.alfredworkflow`
+2. **Enable API** - Open Beeper → Settings → Developers → Toggle "Allow connections" ON
+3. **Authorize** - Run `bp setup` in Alfred and press ↵ on "Connect Alfred to Beeper"
 4. **Start using** - Type `bp` to see all commands!
 
 ## Requirements
 
 - macOS 10.15+
 - [Alfred 5+](https://www.alfredapp.com/) with Powerpack
-- [Beeper Desktop](https://www.beeper.com/) v4.1.169+
+- [Beeper Desktop](https://www.beeper.com/) with the `/v1` API and OAuth
+  (verified on 4.2.1004). Older builds serving only the `/v0` API are not
+  supported — every command returns 404 against them.
 - Node.js 20+ (usually pre-installed on macOS)
 
 ## Installation
 
-### Option 1: Download Latest Build (Recommended)
+### Option 1: Stable release (recommended)
 
-Download the latest development build directly from GitHub Actions:
+Releases attach the workflow file directly, so there is nothing to unzip.
 
-**[⬇️ Download Latest Build](https://nightly.link/deletosh/beeper-alfred/workflows/build/main/beeper-alfred-latest.zip)**
+1. Open [**Releases**](../../releases/latest)
+2. Under **Assets**, download `beeper-alfred.alfredworkflow`
+3. Double-click it to install in Alfred
+4. Run `bp setup` in Alfred to authorize
+
+### Option 2: Latest development build
+
+Builds from `main` are published as GitHub Actions artifacts. Actions always
+serves artifacts as a **`.zip`**, so this route has an extra unzip step —
+inside is the same `beeper-alfred.alfredworkflow` file.
+
+**[⬇️ Download latest build](https://nightly.link/deletosh/beeper-alfred/workflows/build/main/beeper-alfred-latest.zip)** (`.zip`)
 
 Or manually:
 1. Go to [Actions → Build Workflow](../../actions/workflows/build.yml)
-2. Click the latest successful workflow run
-3. Scroll to "Artifacts" and download `beeper-alfred-latest`
-4. Extract the ZIP file
+2. Open the latest successful run on `main`
+3. Under "Artifacts", download `beeper-alfred-latest` (downloads as `.zip`)
+4. Unzip it
 5. Double-click `beeper-alfred.alfredworkflow` to install
-6. Run `bp setup` in Alfred to configure your API token
-
-### Option 2: Stable Release
-
-1. Download the latest stable release from [Releases](../../releases)
-2. Double-click `Beeper.alfredworkflow` to install
-3. Run `bp setup` in Alfred to configure your API token
+6. Run `bp setup` in Alfred to authorize
 
 ## Setup
 
-![Get Access Token](https://i.imgur.com/gT2rahf.gif)
+Authorization uses **OAuth** — there is no token to copy or paste.
 
 1. Open Beeper Desktop
 2. Go to **Settings** (⌘,) → **Developers**
-3. Toggle **"Beeper Desktop API"** to ON
-4. Copy your **Access Token**
-5. In Alfred, type `bp setup` and paste your token
+3. Toggle **"Allow connections"** ON
+4. In Alfred, type `bp setup` and press ↵ on **"Connect Alfred to Beeper"**
+5. Approve the consent page that opens in your browser
+
+`bp setup` also doubles as a status check — run it any time to see whether
+the workflow is connected.
+
+### When authorization expires
+
+Tokens last about 30 days and there is no refresh token, so re-running
+`bp setup` is the normal fix when commands start reporting "Not authorized".
+You can revoke access at any time from Beeper → Settings → Developers →
+**Approved connections**.
+
+> **Note:** the workflow exposes an optional `Access Token` setting for
+> advanced use. Leave it empty. A value there overrides OAuth, so a stale
+> one will shadow a working authorization.
 
 ## Usage
 
@@ -230,8 +251,15 @@ Quick access to your last 10 active chats.
 
 ### "Could not connect to Beeper Desktop API"
 - Ensure Beeper Desktop is running
-- Check API is enabled in Settings → Developers
-- Run `bp setup` to verify your token
+- Check "Allow connections" is ON in Settings → Developers
+- Run `bp setup` to check the connection
+
+### "Not authorized" / "Invalid API Token"
+- Run `bp setup` and re-authorize — tokens expire after ~30 days
+- Check the connection was not revoked under Settings → Developers →
+  Approved connections
+- If you set the optional `Access Token` workflow setting, clear it: it
+  overrides OAuth and a stale value shadows a working authorization
 
 ### "No results found"
 - Wait for Beeper to finish indexing messages
@@ -246,15 +274,27 @@ Quick access to your last 10 active chats.
 
 - All data stays local on your machine
 - API runs on `localhost:23373` only
-- Access token stored securely in Alfred's encrypted storage
-- No external network requests
+- No external network requests, and no runtime dependencies
+- Authorization uses OAuth 2.0 with PKCE; the redirect listener binds to
+  `127.0.0.1` on an ephemeral port and closes as soon as the flow completes
+- The access token is stored with owner-only permissions (`0600`) in Alfred's
+  workflow data directory, and can be revoked from Beeper at any time
 
 ### Setup Development Environment
 
 ```bash
-cd /Users/deletosh/projects/software/beeper-alfred
-npm install
+git clone https://github.com/deletosh/beeper-alfred.git
+cd beeper-alfred
+npm install          # dev tooling only — the workflow itself ships no deps
+
+node src/index.js setup            # authorize, then:
 node src/index.js search "test"
+```
+
+Build an installable `.alfredworkflow` into `dist/`:
+
+```bash
+npm run build
 ```
 
 ## License
