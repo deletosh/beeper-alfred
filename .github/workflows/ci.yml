@@ -100,9 +100,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run npm audit
+      # Advisory: surfaces dev-toolchain issues (eslint/jest transitives)
+      # without failing the build. None of these ship to users.
+      - name: Run npm audit (all dependencies, advisory)
         run: npm audit --audit-level=moderate
         continue-on-error: true
 
-      - name: Check for known vulnerabilities
-        run: npm audit --audit-level=high
+      # Gating: the workflow bundles no node_modules, so only production
+      # dependencies can reach a user's machine. Those must stay clean.
+      - name: Check for known vulnerabilities in shipped code
+        run: npm audit --omit=dev --audit-level=high
