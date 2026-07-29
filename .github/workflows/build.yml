@@ -11,6 +11,13 @@ jobs:
     name: Build Alfred Workflow
     runs-on: macos-latest
 
+    # The PR-comment step posts an issue comment, which the default read-only
+    # GITHUB_TOKEN cannot do (403 "Resource not accessible by integration").
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -115,8 +122,11 @@ jobs:
           path: dist/*.alfredworkflow
           retention-days: 90
 
+      # Convenience only — a failure to comment must not fail a good build
+      # (e.g. PRs from forks, where the token is read-only regardless).
       - name: Comment download link on PR
         if: github.event_name == 'pull_request'
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |
